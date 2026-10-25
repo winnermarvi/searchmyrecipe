@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchMyRecipe</title>
+<script src="/static/tailwind.js"></script>
+<script src="/static/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FFFCF7; --ink:#1E1B16; --muted:#7A7369; --line:#E6DFD3;
+    --green:#1F5A3F; --green-soft:#E4EFE8; --saffron:#E9A63A; --saffron-soft:#FBEFD8;
+  }
+  html,body{background:var(--paper);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif}
+  h1,h2,.display{font-family:"Fraunces",Georgia,serif;font-variation-settings:"SOFT" 60}
+  .chip{display:inline-flex;align-items:center;gap:.35rem;padding:.2rem .6rem;border-radius:999px;font-size:.8rem;border:1px solid var(--line);background:#fff}
+  .chip.token{background:var(--green-soft);border-color:transparent;color:var(--green);font-weight:500}
+  .chip.expanded{background:var(--saffron-soft);border-color:var(--saffron);border-style:dashed;color:#8A5A0B}
+  .tab{padding:.5rem 0;border-bottom:2px solid transparent;color:var(--muted);cursor:pointer}
+  .tab.active{color:var(--ink);border-color:var(--green)}
+  mark{background:var(--saffron-soft);color:inherit;padding:0 .15em;border-radius:3px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.35rem;min-height:140px;overflow:hidden}
+  .tile-glyph{font-size:2.6rem;line-height:1;filter:saturate(.9)}
+  .tile-label{font-size:.7rem;letter-spacing:.04em;opacity:.75}
+  .score-bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+  .score-bar>span{display:block;height:100%;background:var(--saffron)}
+  table.explain td,table.explain th{padding:.3rem .5rem;text-align:right;font-variant-numeric:tabular-nums}
+  table.explain td:first-child,table.explain th:first-child{text-align:left}
+  select,input[type=text]{background:#fff;border:1px solid var(--line);border-radius:10px;padding:.55rem .8rem}
+  input:focus,select:focus{outline:2px solid var(--green);outline-offset:1px}
+  button.primary{background:var(--green);color:#fff;border-radius:10px;padding:.6rem 1.1rem;font-weight:500}
+  button.primary:hover{background:#174631}
+  .rail label{display:block;font-size:.8rem;color:var(--muted);margin:.9rem 0 .3rem}
+  details summary{cursor:pointer;color:var(--green);font-size:.85rem;font-weight:500;list-style:none}
+  details summary::before{content:"▸ ";}
+  details[open] summary::before{content:"▾ ";}
+  @media (prefers-reduced-motion:no-preference){.card{transition:transform .12s}.card:hover{transform:translateY(-1px)}}
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="max-w-6xl mx-auto px-6 pt-8 pb-4">
+  <div class="flex items-end justify-between flex-wrap gap-4">
+    <div>
+      <h1 class="text-4xl font-semibold leading-none">SearchMyRecipe</h1>
+      <p class="text-sm mt-2" style="color:var(--muted)">An explainable recipe retrieval system · <span id="docCount">…</span> recipes indexed</p>
+    </div>
+    <nav class="flex gap-6 text-sm">
+      <span class="tab active" data-tab="search">Search</span>
+      <span class="tab" data-tab="pantry">What can I cook?</span>
+      <span class="tab" data-tab="index">Index explorer</span>
+      <span class="tab" data-tab="eval">Evaluation</span>
+      <span class="tab" data-tab="add">Add recipe</span>
+      <span class="tab" data-tab="about">How it works</span>
+    </nav>
+  </div>
+</header>
+
+<!-- ============================ SEARCH ============================ -->
+<main id="tab-search" class="max-w-6xl mx-auto px-6 pb-16 grid gap-8" style="grid-template-columns: 260px 1fr">
+
+  <aside class="rail">
+    <label>Retrieval model</label>
+    <select id="model" class="w-full"></select>
+    <p id="modelHint" class="text-xs mt-1 leading-relaxed" style="color:var(--muted)"></p>
+
+    <div id="fusionBox" class="hidden">
+      <label>Fusion weight — words vs meaning</label>
+      <input id="wlex" type="range" min="0" max="1" step="0.1" value="0.6" class="w-full">
+      <div class="flex justify-between text-xs" style="color:var(--muted)"><span>meaning</span><span id="wlexVal">0.6 BM25 · 0.4 MiniLM</span><span>words</span></div>
+    </div>
+
+    <label>Diet</label>
+    <select id="diet" class="w-full"><option value="">Any</option><option>Vegetarian</option><option>Non-Vegetarian</option></select>
+
+    <label>Cuisine</label>
+    <select id="cuisine" class="w-full"><option value="">Any</option></select>
+
+    <label>Query expansion</label>
+    <label class="flex items-center gap-2 !mt-1 !text-sm" style="color:var(--ink)"><input type="checkbox" id="expThes" checked> Thesaurus (controlled vocabulary)</label>
+    <label class="flex items-center gap-2 !mt-1 !text-sm" style="color:var(--ink)"><input type="checkbox" id="expCooc" checked> Co-occurrence (global analysis)</label>
+
+    <label>Exclude ingredients</label>
+    <input id="exclude" type="text" class="w-full" placeholder="peanut, onion" autocomplete="off">
+
+    <label>Results</label>
+    <select id="topk" class="w-full"><option>10</option><option selected>20</option><option>50</option></select>
+
+    <p class="text-xs mt-6 leading-relaxed" style="color:var(--muted)">Diet, cuisine and exclusions are compiled into a Boolean expression and evaluated as set operations on the index. The ranking model then scores only that candidate set.</p>
+  </aside>
+
+  <section>
+    <form id="searchForm" class="flex gap-3">
+      <input id="q" type="text" class="flex-1 text-lg" placeholder="e.g. paneer butter masala, dahi bhindi, quick breakfast with poha" autocomplete="off">
+      <button class="primary" type="submit">Search</button>
+    </form>
+
+    <!-- the pipeline strip -->
+    <div id="pipeline" class="hidden mt-5 p-4 rounded-xl" style="background:#fff;border:1px solid var(--line)">
+      <div class="grid gap-3 text-sm" style="grid-template-columns:130px 1fr">
+        <div style="color:var(--muted)">You typed</div><div id="pRaw" class="display text-base"></div>
+        <div style="color:var(--muted)">After text operations</div><div id="pTokens" class="flex flex-wrap gap-1.5"></div>
+        <div style="color:var(--muted)">Expanded with</div><div id="pExpanded" class="flex flex-wrap gap-1.5"></div>
+        <div style="color:var(--muted)">Boolean filter</div><div id="pBool" class="font-mono text-xs"></div>
+        <div style="color:var(--muted)">Ranked by</div><div id="pModel"></div>
+      </div>
+    </div>
+
+    <div id="summary" class="mt-6 text-sm" style="color:var(--muted)"></div>
+    <div id="feedbackBar" class="hidden mt-3 p-3 rounded-xl flex items-center gap-3 flex-wrap text-sm" style="background:var(--saffron-soft);border:1px solid var(--saffron)">
+      <span id="fbCount"></span>
+      <button id="refineBtn" class="primary !py-1.5">Refine with feedback (Rocchio)</button>
+      <button id="resetFb" class="text-xs underline" style="color:#8A5A0B">clear marks</button>
+    </div>
+    <div id="rocchioPanel" class="hidden mt-3 p-4 rounded-xl text-sm" style="background:#fff;border:1px solid var(--line)"></div>
+    <div id="results" class="mt-3 grid gap-4"></div>
+  </section>
+</main>
+
+<!-- ============================ INDEX EXPLORER ============================ -->
+<main id="tab-index" class="max-w-6xl mx-auto px-6 pb-16 hidden">
+  <div class="grid gap-8" style="grid-template-columns: 1fr 1fr">
+    <div>
+      <h2 class="text-2xl font-semibold">Collection statistics</h2>
+      <dl id="stats" class="mt-4 grid grid-cols-2 gap-y-2 text-sm"></dl>
+      <h2 class="text-xl font-semibold mt-8">Most common index terms</h2>
+      <p class="text-xs mt-1 mb-3" style="color:var(--muted)">High document frequency → low IDF → weak discriminators. This is why "salt" barely affects ranking.</p>
+      <div id="commonTerms" class="flex flex-wrap gap-1.5"></div>
+    </div>
+    <div>
+      <h2 class="text-2xl font-semibold">Look up a posting list</h2>
+      <form id="termForm" class="flex gap-3 mt-4">
+        <input id="termInput" type="text" class="flex-1" placeholder="paneer" autocomplete="off">
+        <button class="primary" type="submit">Look up</button>
+      </form>
+      <div id="termOut" class="mt-4 text-sm"></div>
+    </div>
+  </div>
+</main>
+
+<!-- ============================ PANTRY ============================ -->
+<main id="tab-pantry" class="max-w-6xl mx-auto px-6 pb-16 hidden">
+  <h2 class="text-2xl font-semibold">What can I cook with what I have?</h2>
+  <p class="text-sm mt-1" style="color:var(--muted)">Type the ingredients in your kitchen. Two measures are combined with their harmonic mean (the F-measure, as used for precision and recall): <b>coverage</b> = how much of the recipe you already have, and <b>usage</b> = how many of your ingredients the recipe actually uses.</p>
+  <form id="pantryForm" class="mt-4 grid gap-3" style="grid-template-columns:1fr 160px 160px auto">
+    <input id="pantryInput" type="text" placeholder="potato, onion, tomato, cumin, turmeric, salt, oil" autocomplete="off">
+    <select id="pantryDiet"><option value="">Any diet</option><option>Vegetarian</option><option>Non-Vegetarian</option></select>
+    <select id="pantryCov"><option value="0.8">≥ 80% covered</option><option value="0.65">≥ 65% covered</option><option value="0.5" selected>≥ 50% covered</option></select>
+    <button class="primary" type="submit">Find recipes</button>
+  </form>
+  <label class="flex items-center gap-2 mt-3 text-sm"><input type="checkbox" id="pantryStaples" checked> Assume kitchen staples are available (salt, oil, water, onion, garlic, ginger, basic spices)</label>
+  <div id="pantrySummary" class="mt-5 text-sm" style="color:var(--muted)"></div>
+  <div id="pantryResults" class="mt-3 grid gap-4"></div>
+</main>
+
+<!-- ============================ EVALUATION ============================ -->
+<main id="tab-eval" class="max-w-6xl mx-auto px-6 pb-16 hidden">
+  <div class="flex items-end justify-between flex-wrap gap-4">
+    <div>
+      <h2 class="text-2xl font-semibold">How good is each model?</h2>
+      <p class="text-sm mt-1" style="color:var(--muted)">Every model answers the same labelled test queries. Precision@10 asks how clean the top 10 is, Recall@10 how much of the relevant set was found, MAP rewards putting relevant recipes early.</p>
+    </div>
+    <button id="runEval" class="primary">Run evaluation</button>
+  </div>
+  <div id="evalStatus" class="mt-4 text-sm" style="color:var(--muted)"></div>
+  <div class="grid gap-8 mt-4" style="grid-template-columns: 1fr 1fr">
+    <canvas id="evalChart" height="220"></canvas>
+    <table id="evalTable" class="explain w-full text-sm self-start"></table>
+  </div>
+  <details class="mt-6"><summary>Per-query breakdown</summary><div id="evalPerQuery" class="mt-3 text-xs overflow-x-auto"></div></details>
+</main>
+
+<!-- ============================ ADD RECIPE ============================ -->
+<main id="tab-add" class="max-w-3xl mx-auto px-6 pb-16 hidden">
+  <h2 class="text-2xl font-semibold">Add a recipe to the collection</h2>
+  <p class="text-sm mt-1" style="color:var(--muted)">Saved to <code>data/custom_recipes.json</code>, then the inverted index, co-occurrence table and embeddings are rebuilt in the background. Only the new recipe is encoded.</p>
+  <form id="addForm" class="mt-5 grid gap-3">
+    <input name="name" type="text" placeholder="Recipe name" required>
+    <input name="ingredients" type="text" placeholder="Ingredients, comma separated: paneer, butter, tomato, cream, garam masala" required>
+    <textarea name="instructions" rows="5" placeholder="Method" class="rounded-xl p-3" style="border:1px solid var(--line)"></textarea>
+    <div class="grid gap-3" style="grid-template-columns:1fr 140px">
+      <input name="cuisine" type="text" placeholder="Cuisine (e.g. Maharashtrian)">
+      <input name="total_time" type="number" placeholder="Minutes" min="0">
+    </div>
+    <input name="image_url" type="text" placeholder="Image URL (optional)">
+    <div><button class="primary" type="submit">Save recipe</button></div>
+  </form>
+  <pre id="addLog" class="mt-4 text-xs p-3 rounded-xl whitespace-pre-wrap" style="background:#fff;border:1px solid var(--line);color:var(--muted)"></pre>
+</main>
+
+<!-- ============================ ABOUT ============================ -->
+<main id="tab-about" class="max-w-3xl mx-auto px-6 pb-16 hidden text-[15px] leading-relaxed">
+  <h2 class="text-2xl font-semibold">How a query becomes a ranked list</h2>
+  <svg viewBox="0 0 720 300" class="w-full mt-5" font-family="IBM Plex Sans, sans-serif" font-size="12">
+    <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#7A7369"/></marker></defs>
+    <g stroke="#7A7369" stroke-width="1.2" fill="none" marker-end="url(#ar)">
+      <path d="M110 40 L110 70"/><path d="M110 110 L110 140"/>
+      <path d="M170 165 L250 165"/><path d="M170 175 L250 215"/><path d="M170 155 L250 115"/>
+      <path d="M390 115 L470 150"/><path d="M390 165 L470 165"/><path d="M390 215 L470 180"/>
+      <path d="M590 165 L640 165"/>
+    </g>
+    <rect x="30" y="10" width="160" height="30" rx="8" fill="#fff" stroke="#E6DFD3"/><text x="110" y="29" text-anchor="middle">User query</text>
+    <rect x="30" y="70" width="160" height="40" rx="8" fill="#E4EFE8" stroke="#1F5A3F"/><text x="110" y="87" text-anchor="middle" fill="#1F5A3F">Text operations</text><text x="110" y="102" text-anchor="middle" fill="#1F5A3F" font-size="10">tokenise · stop words · lemmatise · normalise</text>
+    <rect x="30" y="140" width="140" height="50" rx="8" fill="#FBEFD8" stroke="#E9A63A"/><text x="100" y="158" text-anchor="middle" fill="#8A5A0B">Query expansion</text><text x="100" y="173" text-anchor="middle" fill="#8A5A0B" font-size="10">thesaurus · co-occurrence</text><text x="100" y="185" text-anchor="middle" fill="#8A5A0B" font-size="10">Rocchio feedback</text>
+    <rect x="250" y="95" width="140" height="40" rx="8" fill="#fff" stroke="#E6DFD3"/><text x="320" y="112" text-anchor="middle">Boolean model</text><text x="320" y="126" text-anchor="middle" font-size="10" fill="#7A7369">filters → candidate set</text>
+    <rect x="250" y="145" width="140" height="40" rx="8" fill="#fff" stroke="#E6DFD3"/><text x="320" y="162" text-anchor="middle">VSM / BM25</text><text x="320" y="176" text-anchor="middle" font-size="10" fill="#7A7369">over the inverted index</text>
+    <rect x="250" y="195" width="140" height="40" rx="8" fill="#fff" stroke="#E6DFD3"/><text x="320" y="212" text-anchor="middle">MiniLM embeddings</text><text x="320" y="226" text-anchor="middle" font-size="10" fill="#7A7369">meaning, cosine</text>
+    <rect x="470" y="145" width="120" height="40" rx="8" fill="#E4EFE8" stroke="#1F5A3F"/><text x="530" y="162" text-anchor="middle" fill="#1F5A3F">Score fusion</text><text x="530" y="176" text-anchor="middle" font-size="10" fill="#1F5A3F">min-max + weighted sum</text>
+    <rect x="640" y="145" width="70" height="40" rx="8" fill="#fff" stroke="#E6DFD3"/><text x="675" y="169" text-anchor="middle">Ranked list</text>
+    <text x="250" y="275" font-size="11" fill="#7A7369">Evaluation: Precision@k · Recall@k · MAP on labelled queries · "Why this result?" explains every score term by term</text>
+  </svg>
+  <ol class="mt-4 space-y-3 list-decimal pl-5">
+    <li><b>Text operations.</b> Query and recipes go through the same pipeline: tokenise → remove stop words (English + recipe words like <i>cup, tbsp, chopped</i>) → lemmatise (<i>tomatoes → tomato</i>) → normalise ingredient names (<i>dahi → curd</i>).</li>
+    <li><b>Inverted index.</b> Each term maps to the recipes containing it and how often. A lookup replaces a scan of all recipes.</li>
+    <li><b>Vector Space Model.</b> Recipes and the query become TF-IDF vectors. Score = cosine of the angle between them, so long recipes are not favoured for length.</li>
+    <li><b>Boolean model.</b> Filters and operator queries (<i>paneer AND (butter OR cream) NOT onion</i>) are parsed with the shunting-yard algorithm into postfix and evaluated as set intersection, union and complement over posting lists. The result is a candidate set, not a ranking.</li>
+    <li><b>BM25.</b> A probabilistic-family ranking: TF-IDF with term-frequency saturation (k1) and document-length normalisation (b).</li>
+    <li><b>Query expansion.</b> Typed terms weigh 1.0. A thesaurus (📖) adds hand-written related terms at 0.5; automatic global analysis (🔗) adds the terms that co-occur most with each query term across the whole collection, measured by Jaccard c(u,v)/(n<sub>u</sub>+n<sub>v</sub>−c(u,v)), at 0.4. This is how "biryani" also retrieves recipes indexed under "basmati" or "salan".</li>
+    <li><b>Rocchio relevance feedback.</b> Mark results 👍/👎 and the query vector moves: q′ = α·q + (β/|D<sub>r</sub>|)·Σ relevant − (γ/|D<sub>n</sub>|)·Σ non-relevant with α = 1, β = 0.75, γ = 0.15. Terms from liked recipes enter the query (expansion) and existing terms change weight (re-weighting); negative weights are dropped and the 30 strongest terms are kept. Works for VSM and BM25.</li>
+    <li><b>Semantic layer (MiniLM).</b> TF-IDF and BM25 can only match shared words. MiniLM is a small pre-trained neural model that turns any text into a 384-number vector so that similar meanings are close; recipes are encoded once and cached. Ranking is still cosine similarity — only the vectors changed. This is how "cold drink for a hot afternoon" finds lemonades and sharbats.</li>
+    <li><b>Score fusion (result merging).</b> BM25 scores are unbounded, cosines live in [0, 1]. Each list is min-max normalised then combined: fused = w·BM25′ + (1 − w)·MiniLM′ (default w = 0.6). The same technique a distributed IR broker uses to merge lists from different collections.</li>
+    <li><b>Why this result?</b> The per-term table shows tf, idf, both weights and their product; the products sum to the dot product, divided by the two norms to give the cosine.</li>
+    <li><b>Evaluation.</b> Precision@10, Recall@10 and Mean Average Precision on 20 labelled queries let us compare all models with numbers rather than opinions.</li>
+  </ol>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+// The dataset's photo host blocks hotlinking (HTTP 403), so each card draws a
+// generated tile: glyph from the dish category, colour hashed from its name.
+function tileHtml(r) {
+  const t = r.tile || { glyph: '🍛', background: '#E8F0E9', ink: '#2F5D45', category: 'recipe' };
+  const img = r.source === 'custom' && r.image_url
+    ? `<img src="${esc(r.image_url)}" alt="" class="absolute inset-0 w-full h-full object-cover" loading="lazy" onerror="this.remove()">` : '';
+  return `<div class="tile" style="background:${t.background};color:${t.ink}">
+    <span class="tile-glyph">${t.glyph}</span>
+    <span class="tile-label">${esc(t.category)}</span>${img}</div>`;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let lastQuery = "";
+
+// ---------- tabs
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  ['search','pantry','index','eval','add','about'].forEach(n => $('#tab-'+n).classList.toggle('hidden', n !== t.dataset.tab));
+  if (t.dataset.tab === 'index') loadStats();
+});
+
+// ---------- meta
+const HINTS = {
+  boolean: 'Type operators: paneer AND (butter OR cream) NOT onion. Adjacent words mean AND. Result is a set — no ranking.',
+  vsm: 'TF-IDF vectors, cosine similarity. Any query term can match; rare terms weigh more.',
+  bm25: 'TF-IDF with term-frequency saturation (k1 = 1.5) and length normalisation (b = 0.75).',
+  hybrid: 'BM25 (words) and MiniLM sentence embeddings (meaning), each min-max normalised, then combined with the weight below.',
+};
+fetch('/meta').then(r => r.json()).then(m => {
+  $('#docCount').textContent = m.documents.toLocaleString();
+  m.models.forEach(x => { const o = document.createElement('option'); o.value = x.id; o.textContent = x.label; $('#model').appendChild(o); });
+  $('#model').value = 'vsm'; $('#modelHint').textContent = HINTS.vsm;
+  $('#model').onchange = () => { $('#modelHint').textContent = HINTS[$('#model').value] || ''; $('#fusionBox').classList.toggle('hidden', $('#model').value !== 'hybrid'); lastQuery && $('#searchForm').requestSubmit(); };
+  m.cuisines.forEach(c => { const o = document.createElement('option'); o.textContent = c; $('#cuisine').appendChild(o); });
+});
+
+// ---------- search
+$('#searchForm').onsubmit = async e => {
+  e.preventDefault();
+  const q = $('#q').value.trim(); if (!q) return;
+  lastQuery = q;
+  $('#summary').textContent = 'Searching…';
+  const p = new URLSearchParams({ q, model: $('#model').value, top_k: $('#topk').value, diet: $('#diet').value, cuisine: $('#cuisine').value, exclude: $('#exclude').value, expand_thesaurus: $('#expThes').checked, expand_cooc: $('#expCooc').checked, w_lex: $('#wlex').value });
+  const res = await fetch('/search?' + p).then(r => r.json());
+  marks = {}; lastVector = null; lastEmbedding = null; round = 0;
+  $('#rocchioPanel').classList.add('hidden');
+  renderPipeline(res);
+  renderResults(res);
+};
+$('#diet').onchange = $('#cuisine').onchange = $('#topk').onchange = () => lastQuery && $('#searchForm').requestSubmit();
+$('#exclude').onchange = $('#expThes').onchange = $('#expCooc').onchange = () => lastQuery && $('#searchForm').requestSubmit();
+$('#wlex').oninput = () => { const w = +$('#wlex').value; $('#wlexVal').textContent = `${w.toFixed(1)} BM25 · ${(1 - w).toFixed(1)} MiniLM`; };
+$('#wlex').onchange = () => lastQuery && $('#searchForm').requestSubmit();
+let lastEmbedding = null;
+const components = {};   // doc_id -> hybrid score components
+let lastModel = 'vsm';
+let marks = {};          // doc_id -> 'rel' | 'non'
+let lastVector = null;   // Rocchio-modified query vector (null = original query)
+let round = 0;
+
+function renderPipeline(res) {
+  $('#pipeline').classList.remove('hidden');
+  $('#pRaw').textContent = res.query;
+  $('#pTokens').innerHTML = res.processed_tokens.length
+    ? res.processed_tokens.map(t => `<span class="chip token">${esc(t)}</span>`).join('')
+    : '<span class="text-xs" style="color:var(--muted)">nothing left after stop-word removal</span>';
+  $('#pExpanded').innerHTML = res.expanded_terms.length
+    ? res.expanded_terms.map(t => `<span class="chip expanded" title="${t.source === 'thesaurus' ? 'thesaurus entry for “' + esc(t.from) + '”' : 'co-occurs with “' + esc(t.from) + '” (Jaccard ' + t.assoc + ')'}">${t.source === 'thesaurus' ? '📖' : '🔗'} ${esc(t.term)} <small>×${t.weight}</small></span>`).join('')
+    : `<span class="text-xs" style="color:var(--muted)">${res.model_id === 'boolean' ? 'not applicable to the Boolean model' : 'nothing added — turn on a strategy or use a term the thesaurus/corpus knows'}</span>`;
+  $('#pBool').textContent = res.boolean_expression || '— none —';
+  $('#pModel').textContent = `${res.model} · candidate set ${res.candidate_count.toLocaleString()} recipes`;
+  lastModel = res.model_id;
+}
+
+function highlight(text, terms) {
+  let out = esc(text);
+  terms.forEach(t => { out = out.replace(new RegExp(`\\b(${t}\\w*)`, 'gi'), '<mark>$1</mark>'); });
+  return out;
+}
+
+function renderResults(res) {
+  const rows = res.results;
+  rows.forEach(r => { if (r.components) components[r.doc_id] = r.components; });
+  $('#summary').textContent = !rows.length
+    ? 'No recipes matched. Try other words — every query term must survive stop-word removal to count.'
+    : res.model_id === 'boolean'
+      ? `${res.total_matched} recipes satisfy the expression — showing ${rows.length} in document order (the Boolean model does not rank)`
+      : `${rows.length} recipes ranked by ${res.model_id === 'vsm' ? 'cosine similarity' : res.model_id === 'bm25' ? 'BM25 score' : 'fused score (0–1)'} (highest first)`;
+  const max = rows.length ? rows[0].score : 1;
+  $('#results').innerHTML = rows.map(r => `
+    <article class="card grid" style="grid-template-columns: 150px 1fr">
+      ${tileHtml(r)}
+      <div class="p-4">
+        <div class="flex justify-between gap-4">
+          <h3 class="display text-lg font-semibold leading-tight"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.name)}</a></h3>
+          <div class="text-right shrink-0">
+            ${res.model_id === 'boolean' ? '<div class="text-xs" style="color:var(--muted)">match</div>' : `<div class="text-sm font-semibold" style="color:#8A5A0B">${r.score.toFixed(3)}</div>
+            <div class="score-bar w-24 mt-1"><span style="width:${(r.score/max*100).toFixed(0)}%"></span></div>`}
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-1.5 mt-2">
+          <span class="chip">${esc(r.cuisine)}</span>
+          <span class="chip">${r.diet === 'Vegetarian' ? '🟢' : '🔴'} ${r.diet}</span>
+          <span class="chip">⏱ ${r.total_time} min</span>
+          <span class="chip">${r.ingredients_count} ingredients</span>
+          ${r.source === 'custom' ? '<span class="chip">custom</span>' : ''}
+        </div>
+        <p class="text-sm mt-3" style="color:#3d3934">${highlight(r.ingredients.join(', '), r.highlight_terms)}</p>
+        ${res.model_id !== 'boolean' ? `<div class="mt-3 flex gap-2 text-xs">
+          <button class="fb chip" data-doc="${r.doc_id}" data-mark="rel">👍 relevant</button>
+          <button class="fb chip" data-doc="${r.doc_id}" data-mark="non">👎 not relevant</button>
+        </div>` : ''}
+        <details class="mt-3" data-doc="${r.doc_id}">
+          <summary>Why this result?</summary>
+          <div class="explain mt-2 text-xs" style="color:var(--muted)">loading…</div>
+        </details>
+      </div>
+    </article>`).join('');
+  document.querySelectorAll('details[data-doc]').forEach(d => d.addEventListener('toggle', () => d.open && loadExplain(d)));
+  document.querySelectorAll('button.fb').forEach(b => b.onclick = () => {
+    const id = b.dataset.doc, m = b.dataset.mark;
+    marks[id] = marks[id] === m ? undefined : m;
+    if (!marks[id]) delete marks[id];
+    paintMarks();
+  });
+  paintMarks();
+}
+
+function paintMarks() {
+  document.querySelectorAll('button.fb').forEach(b => {
+    const on = marks[b.dataset.doc] === b.dataset.mark;
+    b.style.background = on ? (b.dataset.mark === 'rel' ? 'var(--green)' : '#8A5A0B') : '';
+    b.style.color = on ? '#fff' : '';
+  });
+  const rel = Object.values(marks).filter(m => m === 'rel').length, non = Object.values(marks).filter(m => m === 'non').length;
+  $('#feedbackBar').classList.toggle('hidden', !(rel + non));
+  $('#fbCount').textContent = `${rel} relevant · ${non} not relevant`;
+}
+$('#resetFb').onclick = () => { marks = {}; paintMarks(); };
+
+$('#refineBtn').onclick = async () => {
+  const body = {
+    q: lastQuery, model: $('#model').value, top_k: +$('#topk').value,
+    relevant_ids: Object.keys(marks).filter(k => marks[k] === 'rel').map(Number),
+    nonrelevant_ids: Object.keys(marks).filter(k => marks[k] === 'non').map(Number),
+    base_vector: lastVector, base_embedding: lastEmbedding, w_lex: +$('#wlex').value, diet: $('#diet').value, cuisine: $('#cuisine').value, exclude: $('#exclude').value,
+    expand_thesaurus: $('#expThes').checked, expand_cooc: $('#expCooc').checked,
+  };
+  const r = await fetch('/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { alert((await r.json()).detail); return; }
+  const res = await r.json();
+  round += 1; lastVector = res.rocchio.query_vector; lastEmbedding = res.rocchio.query_embedding; marks = {};
+  renderPipeline(res);
+  $('#pModel').textContent += ` · feedback round ${round}`;
+  renderResults(res);
+  renderRocchio(res.rocchio);
+};
+
+function renderRocchio(rc) {
+  const chips = (arr, f) => arr.length ? arr.map(f).join(' ') : '<span style="color:var(--muted)">none</span>';
+  $('#rocchioPanel').classList.remove('hidden');
+  $('#rocchioPanel').innerHTML = `
+    <div class="display text-base font-semibold">Rocchio moved the query</div>
+    <p class="mt-1" style="color:var(--muted)">${rc.query_embedding ? 'Applied twice: to the TF-IDF query vector (below) and to the MiniLM query embedding. ' : ''}q′ = ${rc.alpha}·q + (${rc.beta}/${rc.relevant})·Σ relevant − (${rc.gamma}/${rc.nonrelevant})·Σ non-relevant &nbsp;·&nbsp; ${Object.keys(rc.query_vector).length} terms kept</p>
+    <div class="grid gap-2 mt-3" style="grid-template-columns:120px 1fr">
+      <div style="color:var(--muted)">Strengthened</div><div class="flex flex-wrap gap-1.5">${chips(rc.diff.strengthened, x => `<span class="chip token">${esc(x.term)} <small>${x.old} → ${x.new}</small></span>`)}</div>
+      <div style="color:var(--muted)">Added</div><div class="flex flex-wrap gap-1.5">${chips(rc.diff.added, x => `<span class="chip expanded">${esc(x.term)} <small>${x.weight}</small></span>`)}</div>
+      <div style="color:var(--muted)">Weakened</div><div class="flex flex-wrap gap-1.5">${chips(rc.diff.weakened, x => `<span class="chip">${esc(x.term)} <small>${x.old} → ${x.new}</small></span>`)}</div>
+      <div style="color:var(--muted)">Removed</div><div class="flex flex-wrap gap-1.5">${chips(rc.diff.removed, x => `<span class="chip" style="text-decoration:line-through">${esc(x)}</span>`)}</div>
+    </div>`;
+}
+
+async function loadExplain(d) {
+  const box = d.querySelector('.explain');
+  if (box.dataset.loaded) return;
+  const e = lastVector
+    ? await fetch('/explain_vector', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vector: lastVector, doc_id: +d.dataset.doc, model: lastModel }) }).then(r => r.json())
+    : await fetch(`/explain?q=${encodeURIComponent(lastQuery)}&doc_id=${d.dataset.doc}&model=${lastModel}&expand_thesaurus=${$('#expThes').checked}&expand_cooc=${$('#expCooc').checked}`).then(r => r.json());
+  box.dataset.loaded = 1;
+  const head = { term:'term', tf_raw:'tf', tf:'tf', df:'df', idf:'idf', w_doc:'w(doc)', w_query:'w(query)', contribution:'contribution', in_document:'in document?' };
+  box.innerHTML = `
+    <table class="explain w-full" style="color:var(--ink)">
+      <thead style="color:var(--muted)"><tr>${e.columns.map(c => `<th>${head[c] || c}</th>`).join('')}</tr></thead>
+      <tbody>${e.rows.map(r => `<tr${(r.tf_raw === 0 || r.tf === 0 || r.in_document === false) ? ' style="opacity:.45"' : ''}>${e.columns.map(c => `<td>${typeof r[c] === 'boolean' ? (r[c] ? 'yes' : 'no') : esc(r[c])}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>
+    <p class="mt-2">${esc(e.footer)}</p>
+    ${lastModel === 'hybrid' && components[d.dataset.doc] ? fusionLine(components[d.dataset.doc]) : ''}`;
+}
+
+function fusionLine(c) {
+  const w = c.w_lex, f = (w * c.lexical_norm + (1 - w) * c.semantic_norm).toFixed(4);
+  return `<div class="mt-3 p-2 rounded-lg" style="background:var(--saffron-soft)">
+    <b>Fusion.</b> BM25 ${c.lexical} → min-max <b>${c.lexical_norm}</b>; MiniLM cosine ${c.semantic} → min-max <b>${c.semantic_norm}</b>;
+    fused = ${w}·${c.lexical_norm} + ${(1 - w).toFixed(1)}·${c.semantic_norm} = <b>${f}</b></div>`;
+}
+
+// ---------- pantry
+$('#pantryForm').onsubmit = async e => {
+  e.preventDefault();
+  const ingredients = $('#pantryInput').value.split(',').map(x => x.trim()).filter(Boolean);
+  if (!ingredients.length) return;
+  $('#pantrySummary').textContent = 'Searching…';
+  const res = await fetch('/pantry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ingredients, diet: $('#pantryDiet').value, min_coverage: +$('#pantryCov').value, assume_staples: $('#pantryStaples').checked }) }).then(r => r.json());
+  $('#pantrySummary').textContent = res.results.length
+    ? `${res.results.length} recipes you can (almost) make with ${ingredients.length} ingredients${res.assume_staples ? ', assuming kitchen staples' : ' (staples not assumed)'}`
+    : res.assume_staples
+      ? 'Nothing reaches that coverage — add a few more ingredients or lower the threshold.'
+      : 'Nothing reaches that coverage. Real recipes list many staples, so without the staples assumption a short pantry rarely passes 50%. Tick the box above.';
+  $('#pantryResults').innerHTML = res.results.map(r => `
+    <article class="card grid" style="grid-template-columns: 150px 1fr">
+      ${tileHtml(r)}
+      <div class="p-4">
+        <div class="flex justify-between gap-4">
+          <h3 class="display text-lg font-semibold leading-tight"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.name)}</a></h3>
+          <div class="text-right shrink-0"><div class="text-sm font-semibold" style="color:#8A5A0B">${r.score.toFixed(2)}</div><div class="score-bar w-24 mt-1"><span style="width:${Math.round(r.score * 100)}%"></span></div><div class="text-xs mt-1" style="color:var(--muted)">${Math.round(r.coverage * 100)}% covered · uses ${Math.round(r.usage * 100)}% of yours</div></div>
+        </div>
+        <div class="flex flex-wrap gap-1.5 mt-2"><span class="chip">${esc(r.cuisine)}</span><span class="chip">${r.diet === 'Vegetarian' ? '🟢' : '🔴'} ${r.diet}</span><span class="chip">⏱ ${r.total_time} min</span></div>
+        <p class="text-sm mt-3"><span style="color:var(--green)">From your list:</span> ${r.matched.map(esc).join(', ')}</p>
+        ${r.assumed.length ? `<p class="text-sm mt-1"><span style="color:var(--muted)">Assumed staples:</span> ${r.assumed.map(esc).join(', ')}</p>` : ''}
+        <p class="text-sm mt-1"><span style="color:#8A5A0B">Still need:</span> ${r.missing.length ? r.missing.map(esc).join(', ') : 'nothing 🎉'}</p>
+      </div>
+    </article>`).join('');
+};
+
+// ---------- evaluation
+let evalChart = null;
+$('#runEval').onclick = async () => {
+  $('#evalStatus').textContent = 'Running every model on every test query…';
+  const ev = await fetch('/evaluate').then(r => r.json());
+  $('#evalStatus').textContent = `${ev.queries} test queries (${ev.reviewed} reviewed by the group) · metrics at k = ${ev.k}, ranking depth ${ev.depth}`;
+  const labels = ev.configs.map(c => c.label);
+  const ds = (key, label, color) => ({ label, data: ev.configs.map(c => c[key]), backgroundColor: color, borderRadius: 4 });
+  if (evalChart) evalChart.destroy();
+  evalChart = new Chart($('#evalChart'), { type: 'bar', data: { labels, datasets: [ds('mean_precision_at_k', 'P@10', '#1F5A3F'), ds('mean_recall_at_k', 'R@10', '#9CC3AE'), ds('map', 'MAP', '#E9A63A')] },
+    options: { scales: { y: { min: 0, max: 1 } }, plugins: { legend: { position: 'bottom' } } } });
+  $('#evalTable').innerHTML = `<thead style="color:var(--muted)"><tr><th>Model</th><th>P@10</th><th>R@10</th><th>MAP</th></tr></thead><tbody>${ev.configs.map(c => `<tr><td>${esc(c.label)}</td><td>${c.mean_precision_at_k}</td><td>${c.mean_recall_at_k}</td><td><b>${c.map}</b></td></tr>`).join('')}</tbody>`;
+  const qs = ev.configs[0].rows.map(r => r.query);
+  $('#evalPerQuery').innerHTML = `<table class="explain w-full"><thead style="color:var(--muted)"><tr><th>query (AP)</th>${ev.configs.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${qs.map((q, i) => `<tr><td>${esc(q)} <small style="color:var(--muted)">${ev.configs[0].rows[i].relevant} rel</small></td>${ev.configs.map(c => `<td>${c.rows[i].average_precision}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+};
+
+// ---------- add recipe
+$('#addForm').onsubmit = async e => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target).entries());
+  f.total_time = +f.total_time || 0;
+  const r = await fetch('/recipes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(f) });
+  const j = await r.json();
+  if (!r.ok) { $('#addLog').textContent = j.detail; return; }
+  $('#addLog').textContent = j.message + '\n';
+  e.target.reset();
+  const poll = setInterval(async () => {
+    const st = await fetch('/rebuild/status').then(x => x.json());
+    $('#addLog').textContent = j.message + '\n' + st.log.join('\n') + (st.last_error ? '\nERROR: ' + st.last_error : '');
+    if (!st.running) { clearInterval(poll); fetch('/meta').then(x => x.json()).then(m => $('#docCount').textContent = m.documents.toLocaleString()); }
+  }, 1500);
+};
+
+// ---------- index explorer
+async function loadStats() {
+  const s = await fetch('/index/stats').then(r => r.json());
+  $('#stats').innerHTML = [['Documents (N)', s.documents], ['Vocabulary size', s.vocabulary_size], ['Average document length', s.avg_doc_length + ' tokens'], ['Total postings', s.total_postings]]
+    .map(([k, v]) => `<dt style="color:var(--muted)">${k}</dt><dd class="font-medium">${v}</dd>`).join('');
+  $('#commonTerms').innerHTML = s.most_common_terms.map(t => `<span class="chip">${esc(t.term)} <small style="color:var(--muted)">${t.df}</small></span>`).join('');
+}
+$('#termForm').onsubmit = async e => {
+  e.preventDefault();
+  const r = await fetch('/index/term/' + encodeURIComponent($('#termInput').value.trim()));
+  if (!r.ok) { $('#termOut').textContent = (await r.json()).detail; return; }
+  const t = await r.json();
+  $('#termOut').innerHTML = `<p>Index term <span class="chip token">${esc(t.term)}</span> appears in <b>${t.df}</b> recipes → VSM idf = log₁₀(N / ${t.df}) = <b>${t.idf}</b>; BM25 idf = ln((N − ${t.df} + 0.5)/(${t.df} + 0.5) + 1) = <b>${t.idf_bm25}</b></p>
+    <p class="mt-3 text-xs" style="color:var(--muted)">Posting list (doc_id → term frequency), highest tf first:</p>
+    <ul class="mt-1 space-y-1">${t.postings.map(p => `<li><span class="chip">${p.doc_id}</span> tf ${p.tf} — ${esc(p.name)}</li>`).join('')}</ul>
+    <p class="mt-4 text-xs" style="color:var(--muted)">Strongest global associations (Jaccard co-occurrence across all recipes):</p>
+    <div class="mt-1 flex flex-wrap gap-1.5">${t.associations.length ? t.associations.map(a => `<span class="chip expanded">🔗 ${esc(a.term)} <small>${a.jaccard}</small></span>`).join('') : '<span class="text-xs">none (term too rare or too common for global analysis)</span>'}</div>
+    ${t.thesaurus.length ? `<p class="mt-3 text-xs" style="color:var(--muted)">Thesaurus entry:</p><div class="mt-1 flex flex-wrap gap-1.5">${t.thesaurus.map(x => `<span class="chip expanded">📖 ${esc(x)}</span>`).join('')}</div>` : ''}`;
+};
+</script>
+</body>
+</html>

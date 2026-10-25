@@ -1,0 +1,5 @@
+data/index/
+__pycache__/
+*.pyc
+!data/index/embeddings.npy
+!data/index/doc_ids.json
